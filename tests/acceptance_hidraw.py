@@ -6,13 +6,13 @@ driver is NOT required). Exercises the SPEC.md contract byte-exactly:
 
   T1  identity          VID/PID/strings (3904:f001, ARCTIC / ARCTIC Fan Controller)
   T2  report descriptor 54 bytes, byte-exact vs SPEC.md §5
-  T3  failsafe state    after (re-)enumeration, before any OUT: ch1 = 100 %, 2500 RPM
+  T3  failsafe state    after (re-)enumeration, before any OUT: ch1+ch2 = 100 %, 2500 RPM
   T4  OUT -> ACK        ACK report (ID 0x02, status 0x00) arrives < 1 s
-  T5  RPM spoof         ch1 RPM == duty * 25, PWM byte echoes duty
-  T6  mock channels     ch2-10 echo duty, always report 0 RPM
+  T5  RPM spoof         ch1+ch2 RPM == duty * 25, PWM byte echoes duty
+  T6  mock channels     ch3-10 echo duty, always report 0 RPM
   T7  stress            50 rapid writes, zero ACK timeouts
 
-Hardware-only checks (PB1 frequency/duty, unplug behavior) are printed as
+Hardware-only checks (PB0/PB1 frequency/duty, unplug behavior) are printed as
 manual notes; the unplug/replug re-check is offered interactively (T8).
 
 Usage:
@@ -254,12 +254,14 @@ def main():
             f"got {pwm[0]} (replug USB and re-run if this fails)",
         )
         check("ch1 RPM = 2500", rpm[0] == 2500, f"got {rpm[0]}")
+        check("ch2 PWM = 100", pwm[1] == 100, f"got {pwm[1]}")
+        check("ch2 RPM = 2500", rpm[1] == 2500, f"got {rpm[1]}")
         check(
-            "ch2-10 PWM = 0",
-            all(d == 0 for d in pwm[1:]),
-            f"got {pwm[1:]}",
+            "ch3-10 PWM = 0",
+            all(d == 0 for d in pwm[2:]),
+            f"got {pwm[2:]}",
         )
-        check("ch2-10 RPM = 0", all(r == 0 for r in rpm[1:]), f"got {rpm[1:]}")
+        check("ch3-10 RPM = 0", all(r == 0 for r in rpm[2:]), f"got {rpm[2:]}")
     except TimeoutError:
         check("status report received", False, "timeout")
 
@@ -279,9 +281,9 @@ def main():
     )
 
     # T5: linear RPM spoof ----------------------------------------------------
-    print("T5 RPM spoof (ch1 RPM = duty * 25)")
+    print("T5 RPM spoof (ch1+ch2 RPM = duty * 25)")
     for duty in (0, 25, 50, 75, 100):
-        duties = [duty] + [0] * 9
+        duties = [duty, duty] + [0] * 8
         write_duties(fd, duties)
         ack = wait_ack(fd)
         pwm, rpm = get_status(fd)
@@ -301,20 +303,34 @@ def main():
                 rpm[0] == duty * 25,
                 f"got {rpm[0]}",
             )
+            and check(
+                f"duty {duty:3d} -> PWM2 echo",
+                pwm[1] == duty,
+                f"got {pwm[1]}",
+            )
+            and check(
+                f"duty {duty:3d} -> RPM2 = {duty * 25}",
+                rpm[1] == duty * 25,
+                f"got {rpm[1]}",
+            )
         )
 
     # T6: mock channels -------------------------------------------------------
-    print("T6 mock channels 2-10")
-    duties = [0, 42, 0, 0, 0, 0, 0, 0, 0, 0]
+    print("T6 mock channels 3-10")
+    duties = [0, 0, 42, 0, 0, 0, 0, 0, 0, 0]
     write_duties(fd, duties)
     ack = wait_ack(fd)
     pwm, rpm = get_status(fd)
-    check("write ch2=42 ACK ok", ack == 0x00, f"ack={ack}")
-    check("ch2 PWM echoed", pwm[1] == 42, f"got {pwm[1]}")
-    check("ch2 RPM stays 0", rpm[1] == 0, f"got {rpm[1]}")
-    check("ch1 untouched", pwm[0] == 0 and rpm[0] == 0, f"pwm={pwm[0]} rpm={rpm[0]}")
+    check("write ch3=42 ACK ok", ack == 0x00, f"ack={ack}")
+    check("ch3 PWM echoed", pwm[2] == 42, f"got {pwm[2]}")
+    check("ch3 RPM stays 0", rpm[2] == 0, f"got {rpm[2]}")
+    check(
+        "ch1-2 untouched",
+        pwm[0] == 0 and rpm[0] == 0 and pwm[1] == 0 and rpm[1] == 0,
+        f"pwm={pwm[0]}/{pwm[1]} rpm={rpm[0]}/{rpm[1]}",
+    )
     print(
-        "  [note] PB1 hardware unchanged by ch2 writes — verify with a scope/multimeter"
+        "  [note] PB0/PB1 hardware unchanged by ch3 writes — verify with a scope/multimeter"
     )
 
     # T7: stress ---------------------------------------------------------------
@@ -345,8 +361,8 @@ def main():
     pwm, rpm = get_status(fd)
     check(
         "final state consistent",
-        rpm[0] == pwm[0] * 25,
-        f"pwm={pwm[0]} rpm={rpm[0]}",
+        rpm[0] == pwm[0] * 25 and rpm[1] == pwm[1] * 25,
+        f"pwm={pwm[0]}/{pwm[1]} rpm={rpm[0]}/{rpm[1]}",
     )
 
     # T8: interactive replug failsafe ------------------------------------------
@@ -368,9 +384,12 @@ def main():
             fd = open_hidraw(dev)
             pwm, rpm = get_status(fd)
             check(
-                "after replug, before any OUT: ch1 = 100 % / 2500 RPM",
-                pwm[0] == 100 and rpm[0] == 2500,
-                f"pwm={pwm[0]} rpm={rpm[0]}",
+                "after replug, before any OUT: ch1+ch2 = 100 % / 2500 RPM",
+                pwm[0] == 100
+                and rpm[0] == 2500
+                and pwm[1] == 100
+                and rpm[1] == 2500,
+                f"pwm={pwm[0]}/{pwm[1]} rpm={rpm[0]}/{rpm[1]}",
             )
         except (OSError, TimeoutError) as e:
             check("device re-attached", False, str(e))

@@ -3,11 +3,12 @@
 //! Presents over USB as an ARCTIC Fan Controller (VID 0x3904, PID 0xF001) so
 //! the mainline Linux `arctic_fan` hwmon driver binds to it unpatched.
 //!
-//! - Channel 1 drives a physical 4-pin PC fan: 25 kHz PWM on PB1 (TIM3_CH4).
-//! - Channels 2-10 are mocks: writes are accepted and echoed, RPM reads 0.
-//! - RPM for channel 1 is spoofed as a pure linear function of duty.
+//! - Channel 1 drives a physical 4-pin PC fan: 25 kHz PWM on PB0 (TIM3_CH3).
+//! - Channel 2 drives a second physical fan: 25 kHz PWM on PB1 (TIM3_CH4).
+//! - Channels 3-10 are mocks: writes are accepted and echoed, RPM reads 0.
+//! - RPM for channels 1-2 is spoofed as a pure linear function of duty.
 //! - Fail-safe: with no active USB host (unplugged, host suspend, or before
-//!   the first host command), channel 1 runs at 100 % duty.
+//!   the first host command), channels 1-2 run at 100 % duty.
 //!
 //! See SPEC.md for the full contract.
 
@@ -55,10 +56,12 @@ fn main() -> ! {
     systick.enable_interrupt();
     systick.enable_counter();
 
-    // Fan PWM on PB1 (TIM3_CH4), 25 kHz; starts at 100 % (fail-safe).
+    // Fan PWM on PB0/PB1 (TIM3_CH3/CH4), 25 kHz; both start at 100 %
+    // (fail-safe).
     let mut gpiob = dp.GPIOB.split(&mut rcc);
     let mut pwm = pwm::init(
         dp.TIM3,
+        gpiob.pb0,
         gpiob.pb1,
         &mut gpiob.crl,
         &rcc.clocks,

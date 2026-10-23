@@ -15,8 +15,8 @@ Usage:
 Notes:
   - The OUT report carries all 10 duties; `set` does read-modify-write so
     the other channels keep their current values.
-  - ch1 drives the real fan (PB1); ch2-10 are mocks (echo only, RPM 0).
-  - ch1 RPM is spoofed: rpm = duty * 25.
+  - ch1 and ch2 drive real fans (PB0 / PB1); ch3-10 are mocks (echo only, RPM 0).
+  - ch1-2 RPM is spoofed: rpm = duty * 25.
 """
 
 import glob
@@ -96,7 +96,7 @@ def print_status(pwm, rpm, stamp=False):
     ts = time.strftime("%H:%M:%S") + " " if stamp else ""
     print(f"{ts}{'ch':>3} {'duty %':>7} {'RPM':>6}")
     for i in range(10):
-        hw = " (PB1)" if i == 0 else ""
+        hw = {0: " (PB0)", 1: " (PB1)"}.get(i, "")
         print(f"{'':>4}{i + 1:>2} {pwm[i]:>8} {rpm[i]:>6}{hw}")
 
 

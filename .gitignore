@@ -1,6 +1,9 @@
 # Rust / cargo
 /target
 
+# Python
+__pycache__/
+
 # Nix / direnv
 /.direnv
 /result

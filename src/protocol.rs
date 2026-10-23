@@ -7,6 +7,9 @@
 //! - IN status report, device -> host, 32 bytes: ID 0x01 + 10 duties
 //!   (0-100 %) + 10 x LE16 RPM + 1 reserved.
 //! - IN ACK report, device -> host, 2 bytes: ID 0x02 + status (0 = OK).
+//!
+//! Channels 1 and 2 drive physical fans (PB0 / PB1); their RPM is spoofed
+//! as a pure linear function of duty. Channels 3-10 are mocks (0 RPM).
 
 use core::sync::atomic::{AtomicU32, Ordering};
 use usb_device::prelude::*;
@@ -18,6 +21,8 @@ use crate::pwm::Pwm;
 
 /// Number of fan channels (matches the host driver).
 pub const NUM_CHANNELS: usize = 10;
+/// Channels that drive physical fans (ch1 -> PB0, ch2 -> PB1).
+pub const NUM_PHYSICAL_CHANNELS: usize = 2;
 /// On-the-wire report size including the report-ID byte.
 pub const REPORT_LEN: usize = 32;
 /// Report ID of the 32-byte data reports (OUT duties / IN status).
@@ -81,7 +86,7 @@ pub fn tick() {
 /// Relationship to the host.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum HostState {
-    /// No active host: channel 1 runs at [FAILSAFE_DUTY].
+    /// No active host: channels 1-2 run at [FAILSAFE_DUTY].
     Failsafe,
     /// Host configured and commanding duties.
     HostControlled,
@@ -120,12 +125,13 @@ impl Protocol {
         proto
     }
 
-    /// Effective channel-1 duty: [FAILSAFE_DUTY] in FAILSAFE, else the
+    /// Effective duty of physical channel i (0-based; i <
+    /// [NUM_PHYSICAL_CHANNELS]): [FAILSAFE_DUTY] in FAILSAFE, else the
     /// commanded value.
-    pub fn effective_duty1(&self) -> u8 {
+    fn effective_duty(&self, i: usize) -> u8 {
         match self.state {
             HostState::Failsafe => FAILSAFE_DUTY,
-            HostState::HostControlled => self.duty[0],
+            HostState::HostControlled => self.duty[i],
         }
     }
 
@@ -139,11 +145,12 @@ impl Protocol {
         pwm: &mut Pwm,
     ) {
         // Fail-safe: any non-configured bus state (before the first host
-        // configuration, host suspend, or cable removal) drives channel 1
+        // configuration, host suspend, or cable removal) drives channels 1-2
         // at 100 %. Takes effect immediately.
         if dev.state() != UsbDeviceState::Configured && self.state != HostState::Failsafe {
             self.state = HostState::Failsafe;
-            pwm.set_percent(FAILSAFE_DUTY);
+            pwm.set_percent_ch1(FAILSAFE_DUTY);
+            pwm.set_percent_ch2(FAILSAFE_DUTY);
             self.refresh_status();
         }
 
@@ -155,8 +162,9 @@ impl Protocol {
                 self.duty.copy_from_slice(&buf[1..=NUM_CHANNELS]);
                 if dev.state() == UsbDeviceState::Configured {
                     self.state = HostState::HostControlled;
-                    // Channel 1 is the only channel that touches hardware.
-                    pwm.set_percent(self.duty[0]);
+                    // Channels 1-2 are the only channels that touch hardware.
+                    pwm.set_percent_ch1(self.duty[0]);
+                    pwm.set_percent_ch2(self.duty[1]);
                 }
                 // Queue the ACK; it goes out with priority on the single
                 // IN endpoint (the driver allows 1 s, we deliver in ~us).
@@ -196,16 +204,17 @@ impl Protocol {
         self.status[0] = REPORT_ID_DATA;
         self.status[REPORT_LEN - 1] = 0;
         for i in 0..NUM_CHANNELS {
-            let duty = if i == 0 {
-                self.effective_duty1()
+            let physical = i < NUM_PHYSICAL_CHANNELS;
+            let duty = if physical {
+                self.effective_duty(i)
             } else {
                 self.duty[i]
             };
             self.status[1 + i] = duty;
             // RPM spoof: pure linear duty -> RPM, integer math.
-            // ch 1: 0 % -> 0, 50 % -> 1250, 100 % -> 2500; mocks: always 0.
-            let rpm = if i == 0 {
-                (self.effective_duty1() as u16) * (RPM_MAX / 100)
+            // ch1-2: 0 % -> 0, 50 % -> 1250, 100 % -> 2500; mocks: always 0.
+            let rpm = if physical {
+                (self.effective_duty(i) as u16) * (RPM_MAX / 100)
             } else {
                 0
             };
