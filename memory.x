@@ -1,0 +1,8 @@
+/* STM32F103C8T6 "Blue Pill" */
+MEMORY
+{
+  /* 64 KB of FLASH */
+  FLASH : ORIGIN = 0x08000000, LENGTH = 64K
+  /* 20 KB of RAM */
+  RAM : ORIGIN = 0x20000000, LENGTH = 20K
+}

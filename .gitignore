@@ -1,0 +1,11 @@
+# Rust / cargo
+/target
+
+# Nix / direnv
+/.direnv
+/result
+/result-*
+
+# Build artifacts
+*.bin
+*.hex

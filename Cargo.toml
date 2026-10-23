@@ -1,0 +1,26 @@
+[package]
+name = "fan-controller"
+version = "0.1.0"
+edition = "2021"
+description = "ARCTIC Fan Controller clone firmware for STM32F103C8T6 (Blue Pill)"
+license = "MIT"
+
+[dependencies]
+usb-device = "0.3.2"
+usbd-hid = "0.10.2"
+stm32f1xx-hal = { version = "0.11.0", default-features = false, features = ["stm32f103", "medium"] }
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+panic-halt = "1.0"
+
+[profile.release]
+opt-level = "z"
+debug = true
+lto = true
+
+# The C8T6 has only 64 KB of flash; an unoptimized debug build overflows
+# it. Light optimization + no debuginfo keeps `cargo build` flashable for
+# quick iteration.
+[profile.dev]
+opt-level = 1
+debug = false
